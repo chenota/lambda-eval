@@ -74,7 +74,7 @@ class Parser:
         self._current_token = None
     # Raise an exception
     def _exception(self):
-        raise ParsingException(f'Parsing Error: Unexpected token at position {self._lexer.current()[2]}')
+        raise ParsingException(f'Parsing Error: Unexpected token at position {self._current_token[2]}')
     # Advance to next token, return current token
     def _pop(self):
         saved_token = self._current_token
@@ -172,5 +172,5 @@ class Parser:
         return statement
 
 if __name__ == "__main__":
-    parser = Parser(r'(\x y. x y) a b')
+    parser = Parser(r'(\x.x) a')
     print(parser.parse())
