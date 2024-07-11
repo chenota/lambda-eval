@@ -26,20 +26,14 @@ class Lexer:
         self._position = 0
         # Input stream
         self._input_stream = input_stream
-        # Current token
-        self._current_token = None
         # Advance one
         self.advance()
     def reset(self):
         self._position = 0
-        self.advance()
-    def current(self):
-        return self._current_token
     def advance(self):
         # If at end of input, return EOF
         if self._position >= len(self._input_stream):
-            self._current_token = ('EOF', None, len(self._input_stream))
-            return self._current_token
+            return ('EOF', None, len(self._input_stream))
         # Initialize with None
         current_match = None
         current_token = None
@@ -65,8 +59,7 @@ class Lexer:
         self._position += current_match.span()[1] - current_match.span()[0]
         # Handle return
         if token_save is not None:
-            self._current_token = (current_token, None if token_save == False else current_match.group(), saved_position)
-            return self._current_token
+            return (current_token, None if token_save == False else current_match.group(), saved_position)
         # If skippable token like whitespace, advance again to get next real token
         else:
             return self.advance()
@@ -77,17 +70,19 @@ class Parser:
     def __init__(self, input_stream):
         # Create lexer object
         self._lexer = Lexer(input_stream)
+        # Store current token
+        self._current_token = None
     # Raise an exception
     def _exception(self):
         raise ParsingException(f'Parsing Error: Unexpected token at position {self._lexer.current()[2]}')
     # Advance to next token, return current token
     def _pop(self):
-        curr_token = self._lexer.current()
-        self._lexer.advance()
-        return curr_token
+        saved_token = self._current_token
+        self._current_token = self._lexer.advance()
+        return saved_token
     # Return type of current token
     def _peek(self):
-        return self._lexer.current()[0]
+        return self._current_token[0]
     # Expect certain terminal, pop and return if is at start of stream, error if not 
     def _expect(self, token):
         if self._peek() != token:
@@ -97,6 +92,8 @@ class Parser:
     def parse(self):
         # Reset lexer
         self._lexer.reset()
+        # Get first token
+        self._current_token = self._lexer.advance()
         # Parse program nonterminal
         return self._program()
     # Program nonterminal
@@ -175,5 +172,5 @@ class Parser:
         return statement
 
 if __name__ == "__main__":
-    parser = Parser(r'(\x.x) x')
+    parser = Parser(r'(\x y. x y) a b')
     print(parser.parse())
