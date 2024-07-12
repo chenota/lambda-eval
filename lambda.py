@@ -5,6 +5,8 @@ class LexingException(Exception):
     pass
 class ParsingException(Exception):
     pass
+class EvaluationException(Exception):
+    pass
 
 # Lexer class, generates tokens one-by-one
 class Lexer:
@@ -171,6 +173,125 @@ class Parser:
         self._expect('RPAREN')
         return statement
 
+# Small-step evaluator
+class Evaluator:
+    # Associate a parser w/ evaluator
+    def __init__(self, input_stream):
+        self._parser = Parser(input_stream)
+        self._ast = self._parser.parse()
+    # Reset ast to start
+    def reset(self):
+        self._ast = self._parser.parse()
+    def _substitute(self):
+        pass
+    # Apply function to args
+    def _apply(self, params, body, args):
+        # If just atom, replace 
+        if body[0] == 'ATOM':
+            if body[1] in params:
+                return args[params.index(body[1])]
+            return body
+        # If function, do substitution in body for variables not remapped
+        elif body[0] == 'FUNCTION':
+            # Exclude params that exist in function
+            new_params = []
+            new_args = []
+            for i in range(len(params)):
+                if params[i] not in body[1]:
+                    new_params.append(params[i])
+                    new_args.append(args[i])
+            # Do application
+            return ('FUNCTION', body[1], self._apply(new_params, body[2], new_args))
+        # If application, do substitution for each item in application
+        elif body[0] == 'APPLICATION':
+            for i in range(len(body[1])):
+                body[1][i] = self._apply(params, body[1][i], args)
+            return body
+    # Returns results of single step, doesn't update member variables
+    def step(self, ast=None):
+        # If didn't pass AST, assume its the root AST (make sure it's a copy!)
+        if ast is None:
+            ast = self._ast[::]
+        # Get type of node
+        node_type = ast[0]
+        # Application is reducable
+        if node_type == 'APPLICATION':
+            application_list = ast[1]
+            if len(application_list) < 2:
+                raise EvaluationException(f'Runtime exception: Application must be done on at least two items')
+            # Need to reduce each application item to a value
+            for i, item in enumerate(application_list):
+                # Try to step the item
+                step_result = self.step(ast=item)
+                # If was able to step, return that result
+                if step_result is not None:
+                    # Update application list and return
+                    application_list[i] = step_result
+                    return ast
+            # At this point, all items should be irreducable values
+            # Need to make sure that first item in list is a function
+            if application_list[0][0] != 'FUNCTION':
+                # Cannot apply a non-function to anything
+                return None
+            # Expand function node
+            _, function_args, function_body = application_list[0]
+            # Sanity check: enough args given to satisfy function
+            if len(application_list) - 1 < len(function_args):
+                raise EvaluationException(f'Runtime exception: Not enough arguments given to satisfy the function {self.pretty_print(node=application_list[0])}. Expected {len(function_args)}, got {len(application_list) - 1}.')
+            # Apply function to items
+            application_result = self._apply(function_args, function_body, application_list[1:1+len(function_args)])
+            new_application_list = [application_result] + application_list[1+len(function_args):]
+            if len(new_application_list) == 1:
+                return application_result
+            return ('APPLICATION', new_application_list)
+        # Function body is reducable
+        elif node_type == 'FUNCTION':
+            function_body = ast[2]
+            step_result =  self.step(ast=function_body)
+            if step_result is not None:
+                return ('FUNCTION', ast[1], step_result)
+            return None
+        # Atom is already normal
+        elif node_type == 'ATOM':
+            return None
+        raise EvaluationException(f'Runtime exception: Unkown AST node {node_type}')
+    # Reduce by one step, return reduction result
+    def reduce_once(self):
+        new_ast = self.step()
+        if new_ast is not None:
+            self._ast = new_ast
+        return self._ast
+    # Reduce until cannot reduce any more
+    def reduce_all(self):
+        new_ast = self.step()
+        while new_ast is not None:
+            self._ast = new_ast
+            new_ast = self.step()
+        return self._ast
+    # Pretty print current AST node as string
+    def pretty_print(self, node=None, parent_fn=False, parent_app=False):
+        if node is None:
+            node = self._ast
+        node_type = node[0]
+        if node_type == 'ATOM':
+            return node[1]
+        elif node_type == 'APPLICATION':
+            return (
+                ('(' if parent_app else '') + 
+                ' '.join([self.pretty_print(node=x,parent_app=True) for x in node[1]]) +
+                (')' if parent_app else '')
+            )
+        elif node_type == 'FUNCTION':
+            return (
+                ('(' if not parent_fn else '') + 
+                '\\' + 
+                ' '.join(node[1]) + 
+                '.' + 
+                self.pretty_print(node=node[2],parent_fn=True) + 
+                (')' if not parent_fn else '')
+            )
+
 if __name__ == "__main__":
-    parser = Parser(r'(\x.x) a')
-    print(parser.parse())
+    eval = Evaluator(r'(\x.x) a')
+    eval.reduce_all()
+    print(eval.pretty_print())
