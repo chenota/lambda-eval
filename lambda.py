@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import re
 import curses
 import argparse
@@ -222,7 +224,25 @@ class Evaluator:
             application_list = ast[1]
             if len(application_list) < 2:
                 raise EvaluationException(f'Runtime exception: Application must be done on at least two items')
-            # Need to reduce each application item to a value
+            # Check if function at start of application list
+            if application_list[0][0] == 'FUNCTION':
+                # Expand function node
+                _, function_args, function_body = application_list[0]
+                # Sanity check: enough args given to satisfy function
+                if len(application_list) - 1 < len(function_args):
+                    raise EvaluationException(f'Runtime error: Not enough arguments given to satisfy the function {self.pretty_print(node=application_list[0])}. Expected {len(function_args)}, got {len(application_list) - 1}.')
+                # Apply function to args
+                application_result = self._apply(application_list[0], application_list[1:1+len(function_args)])
+                # Make message
+                self._message = 'Applied ' + self.pretty_print(node=application_list[0]) + ' to ' + ' '.join([self.pretty_print(node=x) for x in application_list[1:1+len(function_args)]]) + ', generating ' + self.pretty_print(node=application_result)
+                # Update application list
+                new_application_list = [application_result] + application_list[1+len(function_args):]
+                # If nothing else to apply, return singular item
+                if len(new_application_list) == 1:
+                    return application_result
+                # More to apply, return application
+                return ('APPLICATION', new_application_list)
+            # Function not at beginning, reduce each application item to a value
             for i, item in enumerate(application_list):
                 # Try to step the item
                 step_result = self.step(ast=item)
@@ -232,27 +252,8 @@ class Evaluator:
                     new_application_list = application_list[::]
                     new_application_list[i] = step_result
                     return ('APPLICATION', new_application_list)
-            # At this point, all items should be irreducable values
-            # Need to make sure that first item in list is a function
-            if application_list[0][0] != 'FUNCTION':
-                # Cannot apply a non-function to anything
-                return None
-            # Expand function node
-            _, function_args, function_body = application_list[0]
-            # Sanity check: enough args given to satisfy function
-            if len(application_list) - 1 < len(function_args):
-                raise EvaluationException(f'Runtime error: Not enough arguments given to satisfy the function {self.pretty_print(node=application_list[0])}. Expected {len(function_args)}, got {len(application_list) - 1}.')
-            # Apply function to args
-            application_result = self._apply(application_list[0], application_list[1:1+len(function_args)])
-            # Make message
-            self._message = 'Applied ' + self.pretty_print(node=application_list[0]) + ' to ' + ' '.join([self.pretty_print(node=x) for x in application_list[1:1+len(function_args)]]) + ', generating ' + self.pretty_print(node=application_result)
-            # Update application list
-            new_application_list = [application_result] + application_list[1+len(function_args):]
-            # If nothing else to apply, return singular item
-            if len(new_application_list) == 1:
-                return application_result
-            # More to apply, return application
-            return ('APPLICATION', new_application_list)
+            # Can't do anything else
+            return None
         # Function body is reducable
         elif node_type == 'FUNCTION':
             function_body = ast[2][::]
@@ -345,8 +346,10 @@ def main_interactive(stdscr, input_stream):
             # If went over end, stop main
             if final_idx is not None and action_idx > final_idx:
                 return
+            elif final_idx is not None and action_idx == final_idx:
+                message = 'Done! Press the right arrow to close...'
             # If already calculated, restore that
-            if action_idx < len(history):
+            elif action_idx < len(history):
                 prev_ast, message = history[action_idx]
                 eval.set_ast(prev_ast)
             # if not already calculated...
@@ -355,7 +358,7 @@ def main_interactive(stdscr, input_stream):
                     # Attempt to reduce once
                     did_reduce = eval.reduce_once()
                     # If reduction was successful, save message and new AST
-                    if did_reduce is not None and action_idx < len(history) - 1:
+                    if did_reduce:
                         message = eval.get_message()
                         history.append((eval.get_ast(), message))
                     # If not successful, can't reduce any more so give option to quit
