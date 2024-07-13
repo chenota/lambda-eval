@@ -333,27 +333,37 @@ def main_interactive(stdscr, input_stream):
         stdscr.clear()
         # Go back if pressed left key
         if key == 'KEY_LEFT' and action_idx >= 0:
+            # Go back one action if not already at 0
             if action_idx > 0: action_idx -= 1
+            # Restore previous message and ast
             prev_ast, message = history[action_idx]
             eval.set_ast(prev_ast)
         # Perform next reduction if right key
         elif key == 'KEY_RIGHT':
+            # Advance one action
             action_idx += 1
+            # If went over end, stop main
             if final_idx is not None and action_idx > final_idx:
                 return
+            # If already calculated, restore that
             if action_idx < len(history):
                 prev_ast, message = history[action_idx]
                 eval.set_ast(prev_ast)
+            # if not already calculated...
             else:
                 try:
+                    # Attempt to reduce once
                     did_reduce = eval.reduce_once()
-                    if did_reduce and len(history) < action_idx + 1:
+                    # If reduction was successful, save message and new AST
+                    if did_reduce is not None:
                         message = eval.get_message()
                         history.append((eval.get_ast(), message))
+                    # If not successful, can't reduce any more so give option to quit
                     else:
                         final_idx = action_idx
                         message = 'Done! Press the right arrow to close...'
-                except Exception as e:
+                # If encounter evaluation exception, put into exception mode
+                except EvaluationException as e:
                     exception_mode = True
                     message = str(e)
         else:
@@ -365,7 +375,7 @@ def main_interactive(stdscr, input_stream):
             stdscr.addstr(3, 0, 'Action')
             stdscr.addstr(4, 2, message)
         else:
-            # Print screen
+            # Print error screen
             stdscr.addstr(0, 0, 'An exception has occured! Press any key to continue...')
             stdscr.addstr(2, 0, message)
             stdscr.getkey()
@@ -383,10 +393,14 @@ class ArgParser(argparse.ArgumentParser):
         self.add_argument('expression', help='Lambda calculus expression to evaluate')
         self.add_argument('--interactive', help='Run the interpreter in interactive mode', action='store_true')
 
+# Main entry point
 if __name__ == "__main__":
+    # Parse cli arguments
     args = ArgParser().parse_args()
+    # Run in interactive mode
     if args.interactive:
         curses.wrapper(main_interactive, args.expression)
+    # Just run interpreter
     else:
         eval = Evaluator(args.expression)
         eval.reduce_all()
