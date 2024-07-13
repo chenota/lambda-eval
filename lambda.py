@@ -1,4 +1,6 @@
 import re
+import curses
+import argparse
 
 # Custom exceptions
 class LexingException(Exception):
@@ -179,17 +181,17 @@ class Evaluator:
     def __init__(self, input_stream):
         self._parser = Parser(input_stream)
         self._ast = self._parser.parse()
+        self._message = None
     # Reset ast to start
     def reset(self):
         self._ast = self._parser.parse()
-    def _substitute(self):
-        pass
     # Apply function to args
-    def _apply(self, params, body, args):
+    def _apply(self, function, args):
+        _, params, body = function
         # If just atom, replace 
         if body[0] == 'ATOM':
             if body[1] in params:
-                return args[params.index(body[1])]
+                return args[params.index(body[1])][::]
             return body
         # If function, do substitution in body for variables not remapped
         elif body[0] == 'FUNCTION':
@@ -201,17 +203,18 @@ class Evaluator:
                     new_params.append(params[i])
                     new_args.append(args[i])
             # Do application
-            return ('FUNCTION', body[1], self._apply(new_params, body[2], new_args))
+            return ('FUNCTION', body[1][::], self._apply(('FUNCTION', new_params, body[2][::]), new_args))
         # If application, do substitution for each item in application
         elif body[0] == 'APPLICATION':
+            new_body = ('APPLICATION', body[1][::])
             for i in range(len(body[1])):
-                body[1][i] = self._apply(params, body[1][i], args)
-            return body
+                new_body[1][i] = self._apply(('FUNCTION', params, new_body[1][i]), args)
+            return new_body
     # Returns results of single step, doesn't update member variables
     def step(self, ast=None):
         # If didn't pass AST, assume its the root AST (make sure it's a copy!)
         if ast is None:
-            ast = self._ast[::]
+            ast = self._ast
         # Get type of node
         node_type = ast[0]
         # Application is reducable
@@ -226,8 +229,9 @@ class Evaluator:
                 # If was able to step, return that result
                 if step_result is not None:
                     # Update application list and return
-                    application_list[i] = step_result
-                    return ast
+                    new_application_list = application_list[::]
+                    new_application_list[i] = step_result
+                    return ('APPLICATION', new_application_list)
             # At this point, all items should be irreducable values
             # Need to make sure that first item in list is a function
             if application_list[0][0] != 'FUNCTION':
@@ -237,30 +241,36 @@ class Evaluator:
             _, function_args, function_body = application_list[0]
             # Sanity check: enough args given to satisfy function
             if len(application_list) - 1 < len(function_args):
-                raise EvaluationException(f'Runtime exception: Not enough arguments given to satisfy the function {self.pretty_print(node=application_list[0])}. Expected {len(function_args)}, got {len(application_list) - 1}.')
-            # Apply function to items
-            application_result = self._apply(function_args, function_body, application_list[1:1+len(function_args)])
+                raise EvaluationException(f'Runtime error: Not enough arguments given to satisfy the function {self.pretty_print(node=application_list[0])}. Expected {len(function_args)}, got {len(application_list) - 1}.')
+            # Apply function to args
+            application_result = self._apply(application_list[0], application_list[1:1+len(function_args)])
+            # Make message
+            self._message = 'Applied ' + self.pretty_print(node=application_list[0]) + ' to ' + ' '.join([self.pretty_print(node=x) for x in application_list[1:1+len(function_args)]]) + ', generating ' + self.pretty_print(node=application_result)
+            # Update application list
             new_application_list = [application_result] + application_list[1+len(function_args):]
+            # If nothing else to apply, return singular item
             if len(new_application_list) == 1:
                 return application_result
+            # More to apply, return application
             return ('APPLICATION', new_application_list)
         # Function body is reducable
         elif node_type == 'FUNCTION':
-            function_body = ast[2]
+            function_body = ast[2][::]
             step_result =  self.step(ast=function_body)
             if step_result is not None:
-                return ('FUNCTION', ast[1], step_result)
+                return ('FUNCTION', ast[1][::], step_result)
             return None
         # Atom is already normal
         elif node_type == 'ATOM':
             return None
-        raise EvaluationException(f'Runtime exception: Unkown AST node {node_type}')
-    # Reduce by one step, return reduction result
+        raise EvaluationException(f'Runtime error: Unkown AST node {node_type}')
+    # Reduce by one step, return reduction result and wether or not did any reduction
     def reduce_once(self):
         new_ast = self.step()
         if new_ast is not None:
             self._ast = new_ast
-        return self._ast
+            return True
+        return False
     # Reduce until cannot reduce any more
     def reduce_all(self):
         new_ast = self.step()
@@ -290,8 +300,94 @@ class Evaluator:
                 self.pretty_print(node=node[2],parent_fn=True) + 
                 (')' if not parent_fn else '')
             )
+    # Getter for AST
+    def get_ast(self):
+        return self._ast[::]
+    # Setter for AST
+    def set_ast(self, ast):
+        self._ast = ast
+    # Getter for message
+    def get_message(self):
+        return self._message
+        
+def main_interactive(stdscr, input_stream):
+    # Clear screen
+    stdscr.clear()
+    # Setup evaluator
+    eval = Evaluator(input_stream)
+    # Print start screen
+    stdscr.addstr(0, 0, 'Expression')
+    stdscr.addstr(1, 2, eval.pretty_print())
+    stdscr.addstr(3, 0, 'Action')
+    stdscr.addstr(4, 2, 'Start')
+    # Action index
+    action_idx = 0
+    history = [(eval._ast[::], 'Start')]
+    final_idx = None
+    while True:
+        message = None
+        exception_mode = False
+        # Get key
+        key = stdscr.getkey()
+        # Clear screen
+        stdscr.clear()
+        # Go back if pressed left key
+        if key == 'KEY_LEFT' and action_idx >= 0:
+            if action_idx > 0: action_idx -= 1
+            prev_ast, message = history[action_idx]
+            eval.set_ast(prev_ast)
+        # Perform next reduction if right key
+        elif key == 'KEY_RIGHT':
+            action_idx += 1
+            if final_idx is not None and action_idx > final_idx:
+                return
+            if action_idx < len(history):
+                prev_ast, message = history[action_idx]
+                eval.set_ast(prev_ast)
+            else:
+                try:
+                    did_reduce = eval.reduce_once()
+                    if did_reduce and len(history) < action_idx + 1:
+                        message = eval.get_message()
+                        history.append((eval.get_ast(), message))
+                    else:
+                        final_idx = action_idx
+                        message = 'Done! Press the right arrow to close...'
+                except Exception as e:
+                    exception_mode = True
+                    message = str(e)
+        else:
+            continue
+        if not exception_mode:
+            # Print screen
+            stdscr.addstr(0, 0, 'Expression')
+            stdscr.addstr(1, 2, eval.pretty_print())
+            stdscr.addstr(3, 0, 'Action')
+            stdscr.addstr(4, 2, message)
+        else:
+            # Print screen
+            stdscr.addstr(0, 0, 'An exception has occured! Press any key to continue...')
+            stdscr.addstr(2, 0, message)
+            stdscr.getkey()
+            return
+
+# Parses cli arguments
+class ArgParser(argparse.ArgumentParser):
+    def __init__(self):
+        # Initialize parent class
+        super(ArgParser, self).__init__(
+            prog='lambda.py',
+            description='Lambda calculus interpreter'
+        )
+        # Add arguments
+        self.add_argument('expression', help='Lambda calculus expression to evaluate')
+        self.add_argument('--interactive', help='Run the interpreter in interactive mode', action='store_true')
 
 if __name__ == "__main__":
-    eval = Evaluator(r'(\x.x) a')
-    eval.reduce_all()
-    print(eval.pretty_print())
+    args = ArgParser().parse_args()
+    if args.interactive:
+        curses.wrapper(main_interactive, args.expression)
+    else:
+        eval = Evaluator(args.expression)
+        eval.reduce_all()
+        print(eval.pretty_print())
