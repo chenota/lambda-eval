@@ -80,19 +80,19 @@ You might notice that applications are right-recursive which should be initially
 
 The lambda calculus language is incredibly simple, which means the lexer is also incredibly simple. The lexer only looks generates five tokens:
 
-| Token | Regex |
-|-|-|
-| LAMBDA | \\ |
-| DOT    | .  |
+| Token  | Value     |
+|--------|-----------|
+| LAMBDA | \\        |
+| DOT    | .         |
 | ATOM   | [a-zA-Z]+ |
-| LPAREN | ( |
-| RPAREN | ) |
+| LPAREN | (         |
+| RPAREN | )         |
 
 Given that tokens don't overlap at all, the lexer doesn't need a scheme for token hierarchy and can immediately terminate upon the first match it finds. Furthemore, the lexer doesn't tokenize the entire input at once, rather it only generates a single token upon a request from the parser.
 
 ### The Parser
 
-The parser is an LL(1) recursive descent parser, which is to say it's a recursive descent parser with a single token lookahead that doesn't backtrack and determines which alternation to use in constant time based on that single token. The syntax of the lambda calculus is incredibly simple so I didn't need to use a complex parser.
+The parser is an LL(1) recursive descent parser, which is to say it's a recursive descent parser with a single token lookahead that doesn't backtrack and determines which alternation to use in constant time based on that single token. The syntax of the lambda calculus is incredibly simple so I didn't need to use a more complex parser.
 
 ### The Evaluator
 
