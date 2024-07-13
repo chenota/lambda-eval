@@ -355,7 +355,7 @@ def main_interactive(stdscr, input_stream):
                     # Attempt to reduce once
                     did_reduce = eval.reduce_once()
                     # If reduction was successful, save message and new AST
-                    if did_reduce is not None:
+                    if did_reduce is not None and action_idx < len(history) - 1:
                         message = eval.get_message()
                         history.append((eval.get_ast(), message))
                     # If not successful, can't reduce any more so give option to quit
